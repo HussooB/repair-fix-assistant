@@ -14,16 +14,22 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 
-// Health check
+// Health check route — keeps Render awake
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    message: 'Backend is alive!', 
+    time: new Date().toISOString() 
+  });
+});
+
+// Root route
 app.get('/', (req, res) => {
   res.json({ message: 'Repair Fix Assistant Backend Running!' });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log('Endpoints:');
-  console.log('  POST /api/auth/signup');
-  console.log('  POST /api/auth/login');
-  console.log('  POST /api/chat/stream (with Authorization: Bearer <token>)');
+  console.log(`Server running on port ${PORT}`);
+  console.log('Health check: /health (use with uptime monitor)');
 });
