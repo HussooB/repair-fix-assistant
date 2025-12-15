@@ -20,68 +20,49 @@ async function searchDevice(query) {
 
     if (results.length === 0) return null;
 
-    // Normalize query for better matching
     const lowerQuery = query.toLowerCase().trim();
-
     let best = results[0];
     let bestScore = 0;
 
     for (const result of results) {
-  const title = result.title.toLowerCase();
-  let score = 0;
+      const title = result.title.toLowerCase();
+      let score = 0;
 
-  // Exact match
-  if (title === lowerQuery) score += 100;
+      // Exact match
+      if (title === lowerQuery) score += 100;
 
-  // Keyword matching
-  const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 2);
-  for (const word of queryWords) {
-    if (title.includes(word)) score += 10;
-  }
+      // Keyword matching
+      const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 2);
+      for (const word of queryWords) {
+        if (title.includes(word)) score += 10;
+      }
 
-  // Prefer real device families
-  if (/^(iphone|ipad|macbook|playstation|galaxy|nintendo|xbox|pixel|surface)/i.test(title)) {
-    score += 10;
-  }
+      // Prefer real device families
+      if (/^(iphone|ipad|macbook|playstation|galaxy|nintendo|xbox|pixel|surface|dell|hp|lenovo)/i.test(title)) {
+        score += 10;
+      }
 
-  // 🚫 Penalize accessories
-  if (
-    title.includes("controller") &&
-    !lowerQuery.includes("controller")
-  ) {
-    score -= 50;
-  }
+      // Accessory handling: small penalty only if unrelated
+      const accessories = ["controller", "headset", "keyboard", "mouse"];
+      for (const acc of accessories) {
+        if (title.includes(acc) && !lowerQuery.includes(acc)) score -= 20; // smaller penalty
+        if (lowerQuery.includes(acc) && title.includes(acc)) score += 50; // boost if matches accessory
+      }
 
-  if (
-    title.includes("remote") ||
-    title.includes("camera") ||
-    title.includes("wheel") ||
-    title.includes("case")
-  ) {
-    score -= 30;
-  }
+      // Boost consoles for thermal issues
+      if ((lowerQuery.includes("fan") || lowerQuery.includes("overheat") || lowerQuery.includes("heating")) &&
+          title.includes("playstation")) {
+        score += 80;
+      }
 
-  // 🔥 Boost console for thermal issues
-  if (
-    (lowerQuery.includes("fan") ||
-     lowerQuery.includes("overheat") ||
-     lowerQuery.includes("heating")) &&
-    title === "playstation 3"
-  ) {
-    score += 80;
-  }
+      // Boost main console names
+      if (title === "playstation 3") score += 40;
 
-  // 🎮 Strong preference for main console names
-  if (title === "playstation 3") {
-    score += 40;
-  }
-
-  if (score > bestScore) {
-    bestScore = score;
-    best = result;
-  }
-}
-
+      if (score > bestScore) {
+        bestScore = score;
+        best = result;
+      }
+    }
 
     console.log("Selected device title:", best.title, `(score: ${bestScore})`);
     return best.title;
