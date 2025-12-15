@@ -1,112 +1,98 @@
-// src/routes/chat.js
+import express from "express";
+import jwt from "jsonwebtoken";
+import { prisma } from "../db/prisma.js";
+import { countTokens } from "../utils/tokenCounter.js";
 
-import express from 'express';
-import jwt from 'jsonwebtoken';
-import { repairGraph } from '../agent/graph.js';
-import { prisma } from '../db/prisma.js';
-import { countTokens } from '../utils/tokenCounter.js';
-
-const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'repair-fix-hackathon-2025-secret';
+const JWT_SECRET =
+  process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
 
 // Auth middleware
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "No token provided" });
   }
 
-  const token = authHeader.split(' ')[1];
   try {
+    const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.id;
     next();
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid or expired token' });
+  } catch {
+    res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
-// Streaming chat endpoint
-router.post('/stream', authenticate, async (req, res) => {
-  const { message, thread_id } = req.body;
+export default function chatRoutes(repairGraph) {
+  const router = express.Router();
 
-  if (!message) {
-    return res.status(400).json({ error: 'Message is required' });
-  }
+  router.post("/stream", authenticate, async (req, res) => {
+    const { message, thread_id } = req.body;
+    const userThreadId = thread_id || `user_${req.userId}`;
 
-  const userThreadId = thread_id || `user_${req.userId}`;
-
-  // SSE headers
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
-  });
-
-  try {
-    for await (const chunk of repairGraph.stream(
-      { userQuery: message },
-      {
-        stream_mode: "updates", // required
-        configurable: { thread_id: userThreadId }
-      }
-    )) {
-      // Tool status updates
-      if (chunk.ifixitResult !== undefined) {
-        res.write(`data: ${JSON.stringify({
-          type: 'status',
-          message: 'Searching iFixit...'
-        })}\n\n`);
-      }
-
-      if (chunk.webResult !== undefined) {
-        res.write(`data: ${JSON.stringify({
-          type: 'status',
-          message: 'Searching web fallback...'
-        })}\n\n`);
-      }
-
-      // Optionally stream full state
-      // Uncomment if you want the whole state each step:
-      // res.write(`data: ${JSON.stringify({ type:'state', state: chunk })}\n\n`);
-    }
-
-    // After stream finishes, get final answer
-    const finalState = await repairGraph.getState({
-      configurable: { thread_id: userThreadId }
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
     });
 
-    const finalAnswer = finalState.values.finalAnswer;
+    try {
+      for await (const event of repairGraph.streamEvents(
+        { userQuery: message },
+        {
+          configurable: { thread_id: userThreadId },
+          version: "v1", // REQUIRED in langgraph v1.x
+        }
+      )) {
+        // Node finished
+        if (event.event === "on_chain_end") {
+          res.write(
+            `data: ${JSON.stringify({
+              type: "node",
+              node: event.name,
+            })}\n\n`
+          );
+        }
 
-    if (finalAnswer?.content) {
-      const tokensUsed = countTokens(finalAnswer.content);
+        // Final output
+        if (
+          event.name === "summarize" &&
+          event.event === "on_chain_end"
+        ) {
+          const finalAnswer = event.data?.output?.finalAnswer;
 
-      await prisma.user.update({
-        where: { id: req.userId },
-        data: { tokensUsed: { increment: tokensUsed } },
-      });
+          if (finalAnswer?.content) {
+            const tokensUsed = countTokens(finalAnswer.content);
 
-      res.write(`data: ${JSON.stringify({
-        type: 'final',
-        content: finalAnswer.content,
-        source: finalAnswer.source,
-        tokensUsed,
-      })}\n\n`);
+            await prisma.user.update({
+              where: { id: req.userId },
+              data: { tokensUsed: { increment: tokensUsed } },
+            });
+
+            res.write(
+              `data: ${JSON.stringify({
+                type: "final",
+                content: finalAnswer.content,
+                source: finalAnswer.source,
+                tokensUsed,
+              })}\n\n`
+            );
+          }
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ type: "end" })}\n\n`);
+      res.end();
+    } catch (err) {
+      res.write(
+        `data: ${JSON.stringify({
+          type: "error",
+          message: err.message,
+        })}\n\n`
+      );
+      res.end();
     }
+  });
 
-    res.write(`data: ${JSON.stringify({ type: 'end' })}\n\n`);
-    res.end();
-
-  } catch (error) {
-    res.write(`data: ${JSON.stringify({
-      type: 'error',
-      message: error.message
-    })}\n\n`);
-    res.end();
-  }
-});
-
-
-
-export default router;
+  return router;
+}
