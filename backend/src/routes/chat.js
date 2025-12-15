@@ -6,7 +6,6 @@ import { countTokens } from "../utils/tokenCounter.js";
 const JWT_SECRET =
   process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
 
-// Auth middleware
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
@@ -22,6 +21,8 @@ const authenticate = (req, res, next) => {
     res.status(401).json({ error: "Invalid or expired token" });
   }
 };
+
+const INTERNAL_NODES = ["__start__", "__end__"];
 
 export default function chatRoutes(repairGraph) {
   const router = express.Router();
@@ -41,11 +42,15 @@ export default function chatRoutes(repairGraph) {
         { userQuery: message },
         {
           configurable: { thread_id: userThreadId },
-          version: "v1", // REQUIRED in langgraph v1.x
+          version: "v1",
         }
       )) {
-        // Node finished
-        if (event.event === "on_chain_end") {
+        // ✅ FILTER INTERNAL NODES
+        if (
+          event.event === "on_chain_end" &&
+          !event.name?.startsWith("ChannelWrite") &&
+          !INTERNAL_NODES.includes(event.name)
+        ) {
           res.write(
             `data: ${JSON.stringify({
               type: "node",
@@ -54,7 +59,7 @@ export default function chatRoutes(repairGraph) {
           );
         }
 
-        // Final output
+        // ✅ FINAL ANSWER
         if (
           event.name === "summarize" &&
           event.event === "on_chain_end"

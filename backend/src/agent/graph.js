@@ -8,14 +8,12 @@ import { webSearch } from "./tools/webSearch.js";
 import { normalizeDeviceNode } from "./nodes/normalizeDevice.js";
 import { summarizeNode } from "./nodes/summarize.js";
 
-/* ---------------- GRAPH DEFINITION ---------------- */
+/* ---------------- GRAPH ---------------- */
 
 const graph = new StateGraph(AgentState);
 
 // Nodes
-graph.addNode("normalize", async (state) => {
-  return await normalizeDeviceNode(state);
-});
+graph.addNode("normalize", normalizeDeviceNode);
 
 graph.addNode("ifixit", async (state) => {
   const result = await fetchRepairGuide(state.userQuery);
@@ -27,11 +25,9 @@ graph.addNode("web", async (state) => {
   return { ...state, webResult: result };
 });
 
-graph.addNode("summarize", async (state) => {
-  return await summarizeNode(state);
-});
+graph.addNode("summarize", summarizeNode);
 
-// Edges
+// Flow
 graph.setEntryPoint("normalize");
 graph.addEdge("normalize", "ifixit");
 
@@ -60,7 +56,5 @@ export async function initializeGraph() {
   const checkpointer = new PostgresSaver(pool);
   await checkpointer.setup();
 
-  return graph.compile({
-    checkpointer,
-  });
+  return graph.compile({ checkpointer });
 }
