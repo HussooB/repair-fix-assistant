@@ -1,26 +1,37 @@
-// src/agent/nodes/summarize.js
 import { generate } from "../llm/huggingface.js";
 
 export async function summarizeNode(state) {
   let content = "";
-  let sourcePrompt = "";
+  let source = "unknown";
+  let promptIntro = "";
+
   if (state.ifixitResult) {
     content = JSON.stringify(state.ifixitResult, null, 2);
-    sourcePrompt = "This is an OFFICIAL iFixit repair guide. Format it beautifully in Markdown: include the title as #, introduction if present, then ## Steps with numbered list. For each step, write **Step X:** followed by the text. Mention '(Images available)' at the end of steps with images. Do NOT add, remove, or change any instructions.";
+    source = "ifixit";
+    promptIntro =
+      "This is an OFFICIAL iFixit repair guide. Format it in clean Markdown.";
   } else if (state.webResult) {
     content = JSON.stringify(state.webResult, null, 2);
-    sourcePrompt = "This is from web search fallback. Summarize into safe, general repair advice in clean Markdown. Do not invent specific steps.";
+    source = "web";
+    promptIntro =
+      "This is web search data. Summarize into safe general repair advice.";
   } else {
-    return state;
+    return {
+      ...state,
+      finalAnswer: {
+        source: "none",
+        content: "No repair information was found.",
+      },
+    };
   }
 
-  const prompt = `${sourcePrompt}\n\nContent:\n${content}`;
+  const prompt = `${promptIntro}\n\n${content}`;
   const formattedContent = await generate(prompt);
 
   return {
     ...state,
     finalAnswer: {
-      source: state.ifixitResult ? "ifixit" : "web",
+      source,
       content: formattedContent,
     },
   };
