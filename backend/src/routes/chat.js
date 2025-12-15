@@ -27,6 +27,7 @@ const authenticate = (req, res, next) => {
 };
 
 // Streaming chat endpoint
+// Streaming chat endpoint
 router.post('/stream', authenticate, async (req, res) => {
   const { message, thread_id } = req.body;
 
@@ -36,7 +37,7 @@ router.post('/stream', authenticate, async (req, res) => {
 
   const userThreadId = thread_id || `user_${req.userId}`;
 
-  // Set headers for Server-Sent Events (event stream)
+  // SSE headers
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -44,42 +45,57 @@ router.post('/stream', authenticate, async (req, res) => {
     'Access-Control-Allow-Origin': '*',
   });
 
-  const config = { configurable: { thread_id: userThreadId } };
-
   try {
-    // Stream tool execution and LLM tokens
-    for await (const chunk of repairGraph.stream(
+    const stream = await repairGraph.astream(
       { userQuery: message },
-      { ...config, streamMode: "updates" }
-    )) {
-      // Send tool status
-      if (chunk.ifixitResult !== undefined || chunk.webResult !== undefined) {
-        res.write(`data: ${JSON.stringify({ type: 'status', message: 'Searching iFixit...' })}\n\n`);
+      {
+        configurable: { thread_id: userThreadId },
+      }
+    );
+
+    for await (const update of stream) {
+      // 🔧 Tool status updates
+      if (update.ifixitResult !== undefined) {
+        res.write(`data: ${JSON.stringify({
+          type: 'status',
+          message: 'Searching iFixit...'
+        })}\n\n`);
       }
 
-      // Send partial LLM response tokens
-      if (chunk.messages && chunk.messages.length > 0) {
-        const lastMessage = chunk.messages[chunk.messages.length - 1];
-        if (lastMessage.content) {
-          res.write(`data: ${JSON.stringify({ type: 'token', content: lastMessage.content })}\n\n`);
+      if (update.webResult !== undefined) {
+        res.write(`data: ${JSON.stringify({
+          type: 'status',
+          message: 'Searching web fallback...'
+        })}\n\n`);
+      }
+
+      // 🧠 LLM token streaming (if messages exist)
+      if (update.messages?.length) {
+        const last = update.messages[update.messages.length - 1];
+        if (last?.content) {
+          res.write(`data: ${JSON.stringify({
+            type: 'token',
+            content: last.content
+          })}\n\n`);
         }
       }
     }
 
-    // Get final state
-    const finalState = await repairGraph.getState(config);
+    // ✅ Fetch final state
+    const finalState = await repairGraph.getState({
+      configurable: { thread_id: userThreadId }
+    });
+
     const finalAnswer = finalState.values.finalAnswer;
 
-    if (finalAnswer) {
-      const tokensUsed = countTokens(finalAnswer.content || '');
+    if (finalAnswer?.content) {
+      const tokensUsed = countTokens(finalAnswer.content);
 
-      // Update user's token usage
       await prisma.user.update({
         where: { id: req.userId },
         data: { tokensUsed: { increment: tokensUsed } },
       });
 
-      // Send final message + updated token count
       res.write(`data: ${JSON.stringify({
         type: 'final',
         content: finalAnswer.content,
@@ -90,10 +106,15 @@ router.post('/stream', authenticate, async (req, res) => {
 
     res.write(`data: ${JSON.stringify({ type: 'end' })}\n\n`);
     res.end();
+
   } catch (error) {
-    res.write(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`);
+    res.write(`data: ${JSON.stringify({
+      type: 'error',
+      message: error.message
+    })}\n\n`);
     res.end();
   }
 });
+
 
 export default router;

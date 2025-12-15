@@ -27,36 +27,61 @@ async function searchDevice(query) {
     let bestScore = 0;
 
     for (const result of results) {
-      const title = result.title.toLowerCase();
-      let score = 0;
+  const title = result.title.toLowerCase();
+  let score = 0;
 
-      // Exact match = highest priority
-      if (title === lowerQuery) {
-        score += 100;
-      }
+  // Exact match
+  if (title === lowerQuery) score += 100;
 
-      // Contains all key words from query
-      const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 2);
-      for (const word of queryWords) {
-        if (title.includes(word)) score += 10;
-      }
+  // Keyword matching
+  const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 2);
+  for (const word of queryWords) {
+    if (title.includes(word)) score += 10;
+  }
 
-      // Prefer titles without weird extras (like "digatel", "accessory", etc.)
-      if (/^(iphone|ipad|macbook|playstation|galaxy|nintendo|xbox|pixel|surface)/i.test(title)) {
-        score += 5;
-      }
+  // Prefer real device families
+  if (/^(iphone|ipad|macbook|playstation|galaxy|nintendo|xbox|pixel|surface)/i.test(title)) {
+    score += 10;
+  }
 
-      // Penalize accessory-sounding titles
-      if (title.includes("case") || title.includes("remote") || title.includes("camera") || 
-          title.includes("wheel") || title.includes("drive") || title.includes("digatel")) {
-        score -= 20;
-      }
+  // 🚫 Penalize accessories
+  if (
+    title.includes("controller") &&
+    !lowerQuery.includes("controller")
+  ) {
+    score -= 50;
+  }
 
-      if (score > bestScore) {
-        bestScore = score;
-        best = result;
-      }
-    }
+  if (
+    title.includes("remote") ||
+    title.includes("camera") ||
+    title.includes("wheel") ||
+    title.includes("case")
+  ) {
+    score -= 30;
+  }
+
+  // 🔥 Boost console for thermal issues
+  if (
+    (lowerQuery.includes("fan") ||
+     lowerQuery.includes("overheat") ||
+     lowerQuery.includes("heating")) &&
+    title === "playstation 3"
+  ) {
+    score += 80;
+  }
+
+  // 🎮 Strong preference for main console names
+  if (title === "playstation 3") {
+    score += 40;
+  }
+
+  if (score > bestScore) {
+    bestScore = score;
+    best = result;
+  }
+}
+
 
     console.log("Selected device title:", best.title, `(score: ${bestScore})`);
     return best.title;
