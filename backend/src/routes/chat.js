@@ -27,7 +27,6 @@ const authenticate = (req, res, next) => {
 };
 
 // Streaming chat endpoint
-// Streaming chat endpoint
 router.post('/stream', authenticate, async (req, res) => {
   const { message, thread_id } = req.body;
 
@@ -46,42 +45,34 @@ router.post('/stream', authenticate, async (req, res) => {
   });
 
   try {
-    const stream = await repairGraph.astream(
+    for await (const chunk of repairGraph.stream(
       { userQuery: message },
       {
-        configurable: { thread_id: userThreadId },
+        stream_mode: "updates", // required
+        configurable: { thread_id: userThreadId }
       }
-    );
-
-    for await (const update of stream) {
-      // 🔧 Tool status updates
-      if (update.ifixitResult !== undefined) {
+    )) {
+      // Tool status updates
+      if (chunk.ifixitResult !== undefined) {
         res.write(`data: ${JSON.stringify({
           type: 'status',
           message: 'Searching iFixit...'
         })}\n\n`);
       }
 
-      if (update.webResult !== undefined) {
+      if (chunk.webResult !== undefined) {
         res.write(`data: ${JSON.stringify({
           type: 'status',
           message: 'Searching web fallback...'
         })}\n\n`);
       }
 
-      // 🧠 LLM token streaming (if messages exist)
-      if (update.messages?.length) {
-        const last = update.messages[update.messages.length - 1];
-        if (last?.content) {
-          res.write(`data: ${JSON.stringify({
-            type: 'token',
-            content: last.content
-          })}\n\n`);
-        }
-      }
+      // Optionally stream full state
+      // Uncomment if you want the whole state each step:
+      // res.write(`data: ${JSON.stringify({ type:'state', state: chunk })}\n\n`);
     }
 
-    // ✅ Fetch final state
+    // After stream finishes, get final answer
     const finalState = await repairGraph.getState({
       configurable: { thread_id: userThreadId }
     });
@@ -115,6 +106,7 @@ router.post('/stream', authenticate, async (req, res) => {
     res.end();
   }
 });
+
 
 
 export default router;
