@@ -1,3 +1,5 @@
+// src/routes/chat.js
+
 import express from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../db/prisma.js";
@@ -43,6 +45,18 @@ export default function chatRoutes(repairGraph) {
     });
     res.flushHeaders();
 
+    const writeToken = async (content) => {
+      res.write(`data: ${JSON.stringify({ type: "token", content })}\n\n`);
+      // Small delay for natural typing feel (~30-50ms per char = realistic)
+      await new Promise((r) => setTimeout(r, 30));
+    };
+
+    const writeDiagnostic = (msg) => {
+      res.write(
+        `data: ${JSON.stringify({ type: "diagnostic", message: msg })}\n\n`
+      );
+    };
+
     try {
       for await (const event of repairGraph.streamEvents(
         { userQuery: message },
@@ -52,91 +66,50 @@ export default function chatRoutes(repairGraph) {
 
         /* ---------------- iFixit NODE ---------------- */
         if (event.name === "ifixit" && event.event === "on_chain_end") {
-          res.write(
-            `data: ${JSON.stringify({
-              type: "diagnostic",
-              message: "🔍 Searching official iFixit repair guides...",
-            })}\n\n`
-          );
+          writeDiagnostic("🔍 Searching official iFixit repair guides...");
 
-          const ifixitResult = event.data.output.ifixitResult;  // Use graph output
+          const ifixitResult = event.data.output.ifixitResult;
 
           if (ifixitResult?.guides?.length) {
-            let buffer = '';
-            for (const [gi, guide] of ifixitResult.guides.entries()) {
-              for (const [si, step] of guide.steps.entries()) {
+            for (const guide of ifixitResult.guides) {
+              for (const step of guide.steps) {
                 const stepMarkdown =
-                  `### Guide ${gi + 1}: ${guide.title}\n` +
-                  `**Step ${si + 1}:** ${step.text}\n` +
+                  `### ${guide.title}\n` +
+                  `**Step:** ${step.text}\n` +
                   (step.images?.length
-                    ? step.images.map((img) => `![img](${img})`).join("\n")
-                    : "") + '\n';
+                    ? step.images.map((img) => `![Guide image](${img})`).join("\n")
+                    : "") +
+                  "\n\n";
 
-                buffer += stepMarkdown;
-
-                // Batch send every 50 chars for efficiency
-                if (buffer.length >= 50) {
-                  res.write(
-                    `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
-                  );
-                  buffer = '';
-                  await new Promise((r) => setTimeout(r, 1));  // Minimal delay
+                for (const char of stepMarkdown) {
+                  await writeToken(char);
                 }
               }
             }
-            // Send remaining buffer
-            if (buffer) {
-              res.write(
-                `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
-              );
-            }
           } else {
-            res.write(
-              `data: ${JSON.stringify({
-                type: "diagnostic",
-                message:
-                  "🌐 No official iFixit guide found. Searching community solutions...",
-              })}\n\n`
-            );
+            writeDiagnostic("🌐 No official iFixit guide found. Searching community solutions...");
           }
         }
 
         /* ---------------- WEB NODE ---------------- */
         if (event.name === "web" && event.event === "on_chain_end") {
-          const webResult = event.data.output.webResult;  // Use graph output
+          const webResult = event.data.output.webResult;
 
           if (webResult?.answer) {
-            let buffer = '';
-            const paragraphs = webResult.answer.split('\n').filter(p => p.trim());
-            for (const paragraph of paragraphs) {
-              buffer += paragraph + '\n';
-              if (buffer.length >= 50) {
-                res.write(
-                  `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
-                );
-                buffer = '';
-                await new Promise((r) => setTimeout(r, 1));
-              }
+            // Stream the answer
+            for (const char of webResult.answer + "\n\n") {
+              await writeToken(char);
             }
 
             // Stream sources
             if (webResult.sources?.length) {
-              const sourcesMarkdown = webResult.sources.map(s => `- [${s.title}](${s.url}): ${s.snippet}`).join('\n');
-              buffer += sourcesMarkdown;
-              if (buffer.length >= 50) {
-                res.write(
-                  `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
-                );
-                buffer = '';
-                await new Promise((r) => setTimeout(r, 1));
-              }
-            }
+              const sourcesText = webResult.sources
+                .map((s) => `- [${s.title}](${s.url})`)
+                .join("\n") + "\n\n";
 
-            // Send remaining
-            if (buffer) {
-              res.write(
-                `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
-              );
+              for (const char of sourcesText) {
+                await writeToken(char);
+              }
             }
           }
         }
@@ -152,21 +125,9 @@ export default function chatRoutes(repairGraph) {
               data: { tokensUsed: { increment: tokensUsed } },
             });
 
-            let buffer = '';
+            // Stream the final LLM response character by character
             for (const char of finalAnswer.content) {
-              buffer += char;
-              if (buffer.length >= 50) {
-                res.write(
-                  `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
-                );
-                buffer = '';
-                await new Promise((r) => setTimeout(r, 1));
-              }
-            }
-            if (buffer) {
-              res.write(
-                `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
-              );
+              await writeToken(char);
             }
 
             res.write(
@@ -179,7 +140,7 @@ export default function chatRoutes(repairGraph) {
       res.write(`data: ${JSON.stringify({ type: "end" })}\n\n`);
       res.end();
     } catch (err) {
-      console.error('Stream error:', err);  // Better logging
+      console.error("Stream error:", err);
       res.write(
         `data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`
       );
