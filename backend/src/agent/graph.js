@@ -8,21 +8,7 @@ import { fetchRepairGuideFromIntent } from "../agent/tools/fetchRepairGuideFromI
 import { webSearch } from "./tools/webSearch.js";
 import { summarizeNode } from "./nodes/summarize.js";
 
-import { prisma } from "../db/prisma.js";
-
-/* ---------------- POSTGRESQL CACHE ---------------- */
-async function getCache(key) {
-  const record = await prisma.toolCache.findUnique({ where: { key } });
-  return record?.value || null;
-}
-
-async function setCache(key, value) {
-  await prisma.toolCache.upsert({
-    where: { key },
-    update: { value },
-    create: { key, value },
-  });
-}
+import { getCachedGuide, setCachedGuide, getCachedWeb, setCachedWeb } from "../db/cacheHelpers.js";
 
 /* ---------------- GRAPH ---------------- */
 const graph = new StateGraph(AgentState);
@@ -37,17 +23,16 @@ graph.addNode("clarifyingNode", async (state) => ({
   source: "agent",
 }));
 
-// iFixit node with PostgreSQL caching, multi-guide, Markdown-ready
+// iFixit node with caching
 graph.addNode("ifixit", async (state) => {
   const query = state.intent?.text || state.userQuery;
   if (!query) return state;
 
-  // Check Postgres cache
-  let result = await getCache(`ifixit:${query}`);
+  let result = await getCachedGuide(query);
   if (!result) {
     try {
       result = await fetchRepairGuideFromIntent(query, 3);
-      await setCache(`ifixit:${query}`, result);
+      await setCachedGuide(query, result);
     } catch (err) {
       console.error("ifixit fetch failed:", err.message);
       result = null;
@@ -58,24 +43,21 @@ graph.addNode("ifixit", async (state) => {
     ...state,
     ifixitResult: result,
     ifixitResultMarkdown: result?.guides?.length
-      ? result.guides
-          .map((g, gi) => `### Guide ${gi + 1}: ${g.title}`)
-          .join("\n\n")
+      ? result.guides.map((g, gi) => `### Guide ${gi + 1}: ${g.title}`).join("\n\n")
       : "",
     source: "ifixit",
   };
 });
 
-
-// Web fallback node with PostgreSQL caching
+// Web fallback node with caching
 graph.addNode("web", async (state) => {
   const query = state.userQuery;
   if (!query) return state;
 
-  let result = await getCache(`web:${query}`);
+  let result = await getCachedWeb(query);
   if (!result) {
     result = await webSearch(query);
-    await setCache(`web:${query}`, result);
+    await setCachedWeb(query, result);
   }
 
   return {

@@ -2,11 +2,8 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../db/prisma.js";
 import { countTokens } from "../utils/tokenCounter.js";
-import { fetchRepairGuideFromIntent } from "../agent/tools/fetchRepairGuideFromIntent.js";
-import { webSearch } from "../agent/tools/webSearch.js";
 
-const JWT_SECRET =
-  process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
+const JWT_SECRET = process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
 
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -25,42 +22,6 @@ const authenticate = (req, res, next) => {
 
 const INTERNAL_NODES = ["__start__", "__end__"];
 
-/* ---------------- CACHE HELPERS ---------------- */
-async function getCachedGuide(query) {
-  const cached = await prisma.toolCache.findUnique({
-    where: { key: `ifixit:${query}` },
-  });
-  if (cached?.value) return cached.value;
-
-  const result = await fetchRepairGuideFromIntent(query, 3);
-  if (result) {
-    await prisma.toolCache.upsert({
-      where: { key: `ifixit:${query}` },
-      update: { value: result },
-      create: { key: `ifixit:${query}`, value: result },
-    });
-  }
-  return result;
-}
-
-async function getCachedWeb(query) {
-  const cached = await prisma.toolCache.findUnique({
-    where: { key: `web:${query}` },
-  });
-  if (cached?.value) return cached.value;
-
-  const result = await webSearch(query);
-  if (result) {
-    await prisma.toolCache.upsert({
-      where: { key: `web:${query}` },
-      update: { value: result },
-      create: { key: `web:${query}`, value: result },
-    });
-  }
-  return result;
-}
-
-/* ---------------- ROUTES ---------------- */
 export default function chatRoutes(repairGraph) {
   const router = express.Router();
 
@@ -91,7 +52,6 @@ export default function chatRoutes(repairGraph) {
 
         /* ---------------- iFixit NODE ---------------- */
         if (event.name === "ifixit" && event.event === "on_chain_end") {
-          // 🔍 REQUIRED: tool execution status streaming
           res.write(
             `data: ${JSON.stringify({
               type: "diagnostic",
@@ -114,10 +74,7 @@ export default function chatRoutes(repairGraph) {
 
                 for (const char of stepMarkdown) {
                   res.write(
-                    `data: ${JSON.stringify({
-                      type: "token",
-                      content: char,
-                    })}\n\n`
+                    `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
                   );
                   await new Promise((r) => setTimeout(r, 5));
                 }
@@ -132,7 +89,6 @@ export default function chatRoutes(repairGraph) {
               }
             }
           } else {
-            // 🌐 REQUIRED: web fallback status
             res.write(
               `data: ${JSON.stringify({
                 type: "diagnostic",
@@ -146,18 +102,12 @@ export default function chatRoutes(repairGraph) {
               for (const paragraph of webResult) {
                 for (const char of paragraph) {
                   res.write(
-                    `data: ${JSON.stringify({
-                      type: "token",
-                      content: char,
-                    })}\n\n`
+                    `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
                   );
                   await new Promise((r) => setTimeout(r, 5));
                 }
                 res.write(
-                  `data: ${JSON.stringify({
-                    type: "step_end",
-                    guideIndex: -1,
-                  })}\n\n`
+                  `data: ${JSON.stringify({ type: "step_end", guideIndex: -1 })}\n\n`
                 );
               }
             }
@@ -177,19 +127,13 @@ export default function chatRoutes(repairGraph) {
 
             for (const char of finalAnswer.content) {
               res.write(
-                `data: ${JSON.stringify({
-                  type: "token",
-                  content: char,
-                })}\n\n`
+                `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
               );
               await new Promise((r) => setTimeout(r, 5));
             }
 
             res.write(
-              `data: ${JSON.stringify({
-                type: "final",
-                tokensUsed,
-              })}\n\n`
+              `data: ${JSON.stringify({ type: "final", tokensUsed })}\n\n`
             );
           }
         }
@@ -199,10 +143,7 @@ export default function chatRoutes(repairGraph) {
       res.end();
     } catch (err) {
       res.write(
-        `data: ${JSON.stringify({
-          type: "error",
-          message: err.message,
-        })}\n\n`
+        `data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`
       );
       res.end();
     }
