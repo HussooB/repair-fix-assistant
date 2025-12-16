@@ -45,35 +45,27 @@ graph.addNode("ifixit", async (state) => {
   // Check Postgres cache
   let result = await getCache(`ifixit:${query}`);
   if (!result) {
-    result = await fetchRepairGuideFromIntent(query, 3); // top 3 guides
-    await setCache(`ifixit:${query}`, result);
-  }
-
-  // Prepare Markdown for all guides
-  let markdown = "";
-  if (result?.guides?.length) {
-    markdown = result.guides
-      .map(
-        (g, gi) =>
-          `### Guide ${gi + 1}: ${g.title}\n\n` +
-          g.steps
-            .map(
-              (s, si) =>
-                `**Step ${si + 1}:** ${s.text}\n` +
-                (s.images?.length ? s.images.map((img) => `![img](${img})`).join("\n") : "")
-            )
-            .join("\n\n")
-      )
-      .join("\n\n---\n\n");
+    try {
+      result = await fetchRepairGuideFromIntent(query, 3);
+      await setCache(`ifixit:${query}`, result);
+    } catch (err) {
+      console.error("ifixit fetch failed:", err.message);
+      result = null;
+    }
   }
 
   return {
     ...state,
     ifixitResult: result,
-    ifixitResultMarkdown: markdown,
+    ifixitResultMarkdown: result?.guides?.length
+      ? result.guides
+          .map((g, gi) => `### Guide ${gi + 1}: ${g.title}`)
+          .join("\n\n")
+      : "",
     source: "ifixit",
   };
 });
+
 
 // Web fallback node with PostgreSQL caching
 graph.addNode("web", async (state) => {
