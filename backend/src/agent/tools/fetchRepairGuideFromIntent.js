@@ -54,7 +54,9 @@ export async function fetchRepairGuideFromIntent(intent, maxGuides = 3) {
       // Clean steps
       const cleanedSteps = rawGuide.steps.map((step) => {
         let images = [];
-        if (Array.isArray(step.media)) {
+        if (step.media?.type === "image" && Array.isArray(step.media.data)) {
+          images = step.media.data.map((m) => m?.large || m?.url).filter(Boolean);
+        } else if (Array.isArray(step.media)) {
           images = step.media.map((m) => m?.url).filter(Boolean);
         } else if (step.media?.url) {
           images = [step.media.url];

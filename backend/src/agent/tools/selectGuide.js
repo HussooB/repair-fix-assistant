@@ -7,8 +7,12 @@ export function selectBestGuide(guides, intent) {
     let score = 0;
     const title = guide.title.toLowerCase();
 
-    if (intent.issue.component && title.includes(intent.issue.component)) {
+    if (intent.issue.component && title.includes(intent.issue.component.toLowerCase())) {
       score += 50;
+    }
+
+    if (intent.issue.symptom && title.includes(intent.issue.symptom.toLowerCase())) {
+      score += 40;
     }
 
     if (intent.issue.type === guide.type) {

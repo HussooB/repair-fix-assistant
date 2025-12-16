@@ -4,7 +4,7 @@ import { StateGraph, END } from "@langchain/langgraph";
 import { AgentState } from "./state.js";
 
 import { extractIntentNode } from "./nodes/extractIntentNode.js";
-import { fetchRepairGuideFromIntent } from "../agent/tools/fetchRepairGuideFromIntent.js";
+import { fetchRepairGuideFromIntent } from "../agent/tools/fetchRepairGuideFromIntent.js";  // Fixed path
 import { webSearch } from "./tools/webSearch.js";
 import { summarizeNode } from "./nodes/summarize.js";
 
@@ -25,14 +25,14 @@ graph.addNode("clarifyingNode", async (state) => ({
 
 // iFixit node with caching
 graph.addNode("ifixit", async (state) => {
-  const query = state.intent?.text || state.userQuery;
-  if (!query) return state;
+  const cacheKey = state.userQuery;  // Use userQuery for caching
+  if (!cacheKey) return state;
 
-  let result = await getCachedGuide(query);
+  let result = await getCachedGuide(cacheKey);
   if (!result) {
     try {
-      result = await fetchRepairGuideFromIntent(query, 3);
-      await setCachedGuide(query, result);
+      result = await fetchRepairGuideFromIntent(state.intent, 3);  // Pass intent object
+      if (result) await setCachedGuide(cacheKey, result);
     } catch (err) {
       console.error("ifixit fetch failed:", err.message);
       result = null;
@@ -57,7 +57,7 @@ graph.addNode("web", async (state) => {
   let result = await getCachedWeb(query);
   if (!result) {
     result = await webSearch(query);
-    await setCachedWeb(query, result);
+    if (result) await setCachedWeb(query, result);
   }
 
   return {
@@ -88,8 +88,17 @@ graph.addConditionalEdges(
   }
 );
 
+// Fallback from ifixit to web if no result
+graph.addConditionalEdges(
+  "ifixit",
+  (state) => state.ifixitResult ? "summarize" : "web",
+  {
+    summarize: "summarize",
+    web: "web",
+  }
+);
+
 // Normal flow
-graph.addEdge("ifixit", "summarize");
 graph.addEdge("web", "summarize");
 graph.addEdge("clarifyingNode", END);
 graph.addEdge("summarize", END);

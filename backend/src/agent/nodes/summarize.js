@@ -22,7 +22,8 @@ Format the answer in clean Markdown:
 Do NOT invent steps.
 `;
   } else if (state.webResult) {
-    toolContent = JSON.stringify(state.webResult, null, 2);
+    const webData = state.webResult;
+    toolContent = webData.answer + '\n\nSources:\n' + webData.sources.map(s => `- ${s.title}: ${s.snippet}`).join('\n');
     source = "web";
     instruction = `
 You are a repair assistant.

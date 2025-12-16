@@ -2,7 +2,6 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../db/prisma.js";
 import { countTokens } from "../utils/tokenCounter.js";
-import { getCachedGuide, getCachedWeb } from "../db/cacheHelpers.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
 
@@ -60,11 +59,10 @@ export default function chatRoutes(repairGraph) {
             })}\n\n`
           );
 
-          const query = event.data?.input?.userQuery || message;
-          const guides = await getCachedGuide(query);
+          const ifixitResult = event.data.output.ifixitResult;  // Use graph output
 
-          if (guides?.guides?.length) {
-            for (const [gi, guide] of guides.guides.entries()) {
+          if (ifixitResult?.guides?.length) {
+            for (const [gi, guide] of ifixitResult.guides.entries()) {
               for (const [si, step] of guide.steps.entries()) {
                 const stepMarkdown =
                   `### Guide ${gi + 1}: ${guide.title}\n` +
@@ -97,19 +95,35 @@ export default function chatRoutes(repairGraph) {
                   "🌐 No official iFixit guide found. Searching community solutions...",
               })}\n\n`
             );
+          }
+        }
 
-            const webResult = await getCachedWeb(query);
-            if (webResult?.length) {
-              for (const paragraph of webResult) {
-                for (const char of paragraph) {
-                  res.write(
-                    `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
-                  );
-                  await new Promise((r) => setTimeout(r, 5));
-                }
+        /* ---------------- WEB NODE ---------------- */
+        if (event.name === "web" && event.event === "on_chain_end") {
+          const webResult = event.data.output.webResult;  // Use graph output
+
+          if (webResult?.answer) {
+            const paragraphs = webResult.answer.split('\n').filter(p => p.trim());
+            for (const paragraph of paragraphs) {
+              for (const char of paragraph) {
                 res.write(
-                  `data: ${JSON.stringify({ type: "step_end", guideIndex: -1 })}\n\n`
+                  `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
                 );
+                await new Promise((r) => setTimeout(r, 5));
+              }
+              res.write(
+                `data: ${JSON.stringify({ type: "step_end", guideIndex: -1 })}\n\n`
+              );
+            }
+
+            // Stream sources
+            if (webResult.sources?.length) {
+              const sourcesMarkdown = webResult.sources.map(s => `- [${s.title}](${s.url}): ${s.snippet}`).join('\n');
+              for (const char of sourcesMarkdown) {
+                res.write(
+                  `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
+                );
+                await new Promise((r) => setTimeout(r, 5));
               }
             }
           }
