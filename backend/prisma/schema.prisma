@@ -18,10 +18,12 @@ model User {
 }
 
 model Chat {
-  id       String @id @default(uuid())
-  userId   Int
-  threadId String @unique
-  user     User   @relation(fields: [userId], references: [id])
+  id        String @id @default(uuid())
+  userId    Int
+  threadId  String @unique
+  user      User   @relation(fields: [userId], references: [id])
+  title     String
+  createdAt DateTime @default(now())
 }
 
 model ToolCache {

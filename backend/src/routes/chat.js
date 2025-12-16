@@ -9,9 +9,8 @@ const JWT_SECRET = process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
 
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "No token provided" });
-  }
+  if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "No token provided" });
+
   try {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -58,6 +57,7 @@ async function getCachedWeb(query) {
 export default function chatRoutes(repairGraph) {
   const router = express.Router();
 
+  // CORS preflight
   router.options("/stream", (req, res) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -65,6 +65,7 @@ export default function chatRoutes(repairGraph) {
     res.sendStatus(204);
   });
 
+  // Stream chat messages
   router.post("/stream", authenticate, async (req, res) => {
     const { message, thread_id } = req.body;
     const userThreadId = thread_id || `user_${req.userId}`;
@@ -104,7 +105,6 @@ export default function chatRoutes(repairGraph) {
               }
             }
           } else {
-            // Fallback to web search if no iFixit guides
             const webResult = await getCachedWeb(query);
             if (webResult?.length) {
               for (const paragraph of webResult) {
@@ -142,6 +142,42 @@ export default function chatRoutes(repairGraph) {
     } catch (err) {
       res.write(`data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`);
       res.end();
+    }
+  });
+
+  // Fetch all chat threads for sidebar
+  router.get("/history", authenticate, async (req, res) => {
+    const chats = await prisma.chat.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: "desc" },
+      select: { threadId: true, title: true, createdAt: true },
+    });
+    res.json(chats);
+  });
+
+  // Fetch single chat by threadId
+  router.get("/history/:threadId", authenticate, async (req, res) => {
+    const { threadId } = req.params;
+    const chat = await prisma.chat.findUnique({ where: { threadId } });
+    if (!chat) return res.status(404).json({ error: "Chat not found" });
+    res.json(chat);
+  });
+
+  // Create new chat
+  router.post("/new", authenticate, async (req, res) => {
+    try {
+      const { title } = req.body;
+      const threadId = `user_${req.userId}_${Date.now()}`;
+      const newChat = await prisma.chat.create({
+        data: {
+          userId: req.userId,
+          threadId,
+          title: title || "New Chat",
+        },
+      });
+      res.json(newChat);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   });
 
