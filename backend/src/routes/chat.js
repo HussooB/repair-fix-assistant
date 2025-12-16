@@ -2,6 +2,7 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../db/prisma.js";
 import { countTokens } from "../utils/tokenCounter.js";
+import { getCachedGuide, getCachedWeb } from "../db/cacheHelpers.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
 
