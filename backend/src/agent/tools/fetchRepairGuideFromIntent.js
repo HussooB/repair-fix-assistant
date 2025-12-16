@@ -41,39 +41,41 @@ export async function fetchRepairGuideFromIntent(intent, maxGuides = 3) {
     .sort((a, b) => b.score - a.score)
     .slice(0, maxGuides);
 
-  // Step 4: Fetch each guide details
-  const fetchedGuides = [];
-  for (const guide of topGuides) {
-    if (!guide.guideid) continue;
-    try {
-      const guideRes = await axios.get(`${BASE}/guides/${guide.guideid}`);
-      const rawGuide = guideRes.data;
+  // Step 4: Fetch each guide details (parallel for efficiency)
+  const fetchedGuides = await Promise.all(
+    topGuides.map(async (guide) => {
+      if (!guide.guideid) return null;
+      try {
+        const guideRes = await axios.get(`${BASE}/guides/${guide.guideid}`);
+        const rawGuide = guideRes.data;
 
-      if (!rawGuide || !Array.isArray(rawGuide.steps)) continue;
+        if (!rawGuide || !Array.isArray(rawGuide.steps)) return null;
 
-      // Clean steps
-      const cleanedSteps = rawGuide.steps.map((step) => {
-        let images = [];
-        if (step.media?.type === "image" && Array.isArray(step.media.data)) {
-          images = step.media.data.map((m) => m?.large || m?.url).filter(Boolean);
-        } else if (Array.isArray(step.media)) {
-          images = step.media.map((m) => m?.url).filter(Boolean);
-        } else if (step.media?.url) {
-          images = [step.media.url];
-        }
+        // Clean steps
+        const cleanedSteps = rawGuide.steps.map((step) => {
+          let images = [];
+          if (step.media?.type === "image" && Array.isArray(step.media.data)) {
+            images = step.media.data.map((m) => m?.large || m?.url).filter(Boolean);
+          } else if (Array.isArray(step.media)) {
+            images = step.media.map((m) => m?.url).filter(Boolean);
+          } else if (step.media?.url) {
+            images = [step.media.url];
+          }
 
-        return { text: step.text.replace(/<[^>]*>/g, "").trim(), images };
-      });
+          return { text: step.text.replace(/<[^>]*>/g, "").trim(), images };
+        });
 
-      fetchedGuides.push({
-        title: rawGuide.title,
-        markdown: guideToMarkdown({ steps: cleanedSteps }),
-        steps: cleanedSteps,
-      });
-    } catch (err) {
-      console.error(`Failed fetching guide ${guide.guideid}:`, err.message);
-    }
-  }
+        return {
+          title: rawGuide.title,
+          markdown: guideToMarkdown({ steps: cleanedSteps }),
+          steps: cleanedSteps,
+        };
+      } catch (err) {
+        console.error(`Failed fetching guide ${guide.guideid}:`, err.message);
+        return null;
+      }
+    })
+  ).then(results => results.filter(Boolean));  // Filter nulls
 
   // Step 5: Return structured object for streaming
   if (!fetchedGuides.length) return null;

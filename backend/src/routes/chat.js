@@ -62,6 +62,7 @@ export default function chatRoutes(repairGraph) {
           const ifixitResult = event.data.output.ifixitResult;  // Use graph output
 
           if (ifixitResult?.guides?.length) {
+            let buffer = '';
             for (const [gi, guide] of ifixitResult.guides.entries()) {
               for (const [si, step] of guide.steps.entries()) {
                 const stepMarkdown =
@@ -69,23 +70,25 @@ export default function chatRoutes(repairGraph) {
                   `**Step ${si + 1}:** ${step.text}\n` +
                   (step.images?.length
                     ? step.images.map((img) => `![img](${img})`).join("\n")
-                    : "");
+                    : "") + '\n';
 
-                for (const char of stepMarkdown) {
+                buffer += stepMarkdown;
+
+                // Batch send every 50 chars for efficiency
+                if (buffer.length >= 50) {
                   res.write(
-                    `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
+                    `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
                   );
-                  await new Promise((r) => setTimeout(r, 5));
+                  buffer = '';
+                  await new Promise((r) => setTimeout(r, 1));  // Minimal delay
                 }
-
-                res.write(
-                  `data: ${JSON.stringify({
-                    type: "step_end",
-                    guideIndex: gi,
-                    stepIndex: si,
-                  })}\n\n`
-                );
               }
+            }
+            // Send remaining buffer
+            if (buffer) {
+              res.write(
+                `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
+              );
             }
           } else {
             res.write(
@@ -103,28 +106,37 @@ export default function chatRoutes(repairGraph) {
           const webResult = event.data.output.webResult;  // Use graph output
 
           if (webResult?.answer) {
+            let buffer = '';
             const paragraphs = webResult.answer.split('\n').filter(p => p.trim());
             for (const paragraph of paragraphs) {
-              for (const char of paragraph) {
+              buffer += paragraph + '\n';
+              if (buffer.length >= 50) {
                 res.write(
-                  `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
+                  `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
                 );
-                await new Promise((r) => setTimeout(r, 5));
+                buffer = '';
+                await new Promise((r) => setTimeout(r, 1));
               }
-              res.write(
-                `data: ${JSON.stringify({ type: "step_end", guideIndex: -1 })}\n\n`
-              );
             }
 
             // Stream sources
             if (webResult.sources?.length) {
               const sourcesMarkdown = webResult.sources.map(s => `- [${s.title}](${s.url}): ${s.snippet}`).join('\n');
-              for (const char of sourcesMarkdown) {
+              buffer += sourcesMarkdown;
+              if (buffer.length >= 50) {
                 res.write(
-                  `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
+                  `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
                 );
-                await new Promise((r) => setTimeout(r, 5));
+                buffer = '';
+                await new Promise((r) => setTimeout(r, 1));
               }
+            }
+
+            // Send remaining
+            if (buffer) {
+              res.write(
+                `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
+              );
             }
           }
         }
@@ -140,11 +152,21 @@ export default function chatRoutes(repairGraph) {
               data: { tokensUsed: { increment: tokensUsed } },
             });
 
+            let buffer = '';
             for (const char of finalAnswer.content) {
+              buffer += char;
+              if (buffer.length >= 50) {
+                res.write(
+                  `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
+                );
+                buffer = '';
+                await new Promise((r) => setTimeout(r, 1));
+              }
+            }
+            if (buffer) {
               res.write(
-                `data: ${JSON.stringify({ type: "token", content: char })}\n\n`
+                `data: ${JSON.stringify({ type: "token", content: buffer })}\n\n`
               );
-              await new Promise((r) => setTimeout(r, 5));
             }
 
             res.write(
@@ -157,6 +179,7 @@ export default function chatRoutes(repairGraph) {
       res.write(`data: ${JSON.stringify({ type: "end" })}\n\n`);
       res.end();
     } catch (err) {
+      console.error('Stream error:', err);  // Better logging
       res.write(
         `data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`
       );
