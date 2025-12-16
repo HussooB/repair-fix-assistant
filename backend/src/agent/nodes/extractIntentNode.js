@@ -1,6 +1,14 @@
 // src/agent/nodes/extractIntentNode.js
 import { generate } from "../llm/huggingface.js";
 
+/**
+ * Strip triple backticks or markdown code fences from LLM output
+ */
+function cleanJsonString(str) {
+  if (!str) return str;
+  return str.replace(/```(?:json)?\n?|```/g, "").trim();
+}
+
 export async function extractIntentNode(state) {
   const prompt = `
 You extract structured repair intent for querying iFixit.
@@ -29,7 +37,8 @@ User query:
 
   try {
     const raw = await generate(prompt);
-    const intent = JSON.parse(raw);
+    const cleaned = cleanJsonString(raw);
+    const intent = JSON.parse(cleaned);
 
     return {
       ...state,
