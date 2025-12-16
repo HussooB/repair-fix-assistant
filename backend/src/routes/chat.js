@@ -5,11 +5,13 @@ import { countTokens } from "../utils/tokenCounter.js";
 import { fetchRepairGuideFromIntent } from "../agent/tools/fetchRepairGuideFromIntent.js";
 import { webSearch } from "../agent/tools/webSearch.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
+const JWT_SECRET =
+  process.env.JWT_SECRET || "repair-fix-hackathon-2025-secret";
 
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "No token provided" });
+  if (!authHeader?.startsWith("Bearer "))
+    return res.status(401).json({ error: "No token provided" });
 
   try {
     const token = authHeader.split(" ")[1];
@@ -23,9 +25,11 @@ const authenticate = (req, res, next) => {
 
 const INTERNAL_NODES = ["__start__", "__end__"];
 
-// Helpers
+/* ---------------- CACHE HELPERS ---------------- */
 async function getCachedGuide(query) {
-  let cached = await prisma.toolCache.findUnique({ where: { key: `ifixit:${query}` } });
+  const cached = await prisma.toolCache.findUnique({
+    where: { key: `ifixit:${query}` },
+  });
   if (cached?.value) return cached.value;
 
   const result = await fetchRepairGuideFromIntent(query, 3);
@@ -40,7 +44,9 @@ async function getCachedGuide(query) {
 }
 
 async function getCachedWeb(query) {
-  let cached = await prisma.toolCache.findUnique({ where: { key: `web:${query}` } });
+  const cached = await prisma.toolCache.findUnique({
+    where: { key: `web:${query}` },
+  });
   if (cached?.value) return cached.value;
 
   const result = await webSearch(query);
@@ -54,10 +60,10 @@ async function getCachedWeb(query) {
   return result;
 }
 
+/* ---------------- ROUTES ---------------- */
 export default function chatRoutes(repairGraph) {
   const router = express.Router();
 
-  // CORS preflight
   router.options("/stream", (req, res) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -65,7 +71,6 @@ export default function chatRoutes(repairGraph) {
     res.sendStatus(204);
   });
 
-  // Stream chat messages
   router.post("/stream", authenticate, async (req, res) => {
     const { message, thread_id } = req.body;
     const userThreadId = thread_id || `user_${req.userId}`;
@@ -73,7 +78,7 @@ export default function chatRoutes(repairGraph) {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
     });
     res.flushHeaders();
 
@@ -84,55 +89,108 @@ export default function chatRoutes(repairGraph) {
       )) {
         if (INTERNAL_NODES.includes(event.name)) continue;
 
-        // iFixit streaming
+        /* ---------------- iFixit NODE ---------------- */
         if (event.name === "ifixit" && event.event === "on_chain_end") {
+          // 🔍 REQUIRED: tool execution status streaming
+          res.write(
+            `data: ${JSON.stringify({
+              type: "diagnostic",
+              message: "🔍 Searching official iFixit repair guides...",
+            })}\n\n`
+          );
+
           const query = event.data?.input?.userQuery || message;
           const guides = await getCachedGuide(query);
 
           if (guides?.guides?.length) {
             for (const [gi, guide] of guides.guides.entries()) {
-              await new Promise((r) => setTimeout(r, 100));
               for (const [si, step] of guide.steps.entries()) {
                 const stepMarkdown =
-                  `### Guide ${gi + 1}: ${guide.title}\n**Step ${si + 1}:** ${step.text}\n` +
-                  (step.images?.length ? step.images.map((img) => `![img](${img})`).join("\n") : "");
+                  `### Guide ${gi + 1}: ${guide.title}\n` +
+                  `**Step ${si + 1}:** ${step.text}\n` +
+                  (step.images?.length
+                    ? step.images.map((img) => `![img](${img})`).join("\n")
+                    : "");
 
                 for (const char of stepMarkdown) {
-                  res.write(`data: ${JSON.stringify({ type: "token", content: char })}\n\n`);
+                  res.write(
+                    `data: ${JSON.stringify({
+                      type: "token",
+                      content: char,
+                    })}\n\n`
+                  );
                   await new Promise((r) => setTimeout(r, 5));
                 }
-                res.write(`data: ${JSON.stringify({ type: "step_end", guideIndex: gi, stepIndex: si })}\n\n`);
+
+                res.write(
+                  `data: ${JSON.stringify({
+                    type: "step_end",
+                    guideIndex: gi,
+                    stepIndex: si,
+                  })}\n\n`
+                );
               }
             }
           } else {
+            // 🌐 REQUIRED: web fallback status
+            res.write(
+              `data: ${JSON.stringify({
+                type: "diagnostic",
+                message:
+                  "🌐 No official iFixit guide found. Searching community solutions...",
+              })}\n\n`
+            );
+
             const webResult = await getCachedWeb(query);
             if (webResult?.length) {
               for (const paragraph of webResult) {
                 for (const char of paragraph) {
-                  res.write(`data: ${JSON.stringify({ type: "token", content: char })}\n\n`);
+                  res.write(
+                    `data: ${JSON.stringify({
+                      type: "token",
+                      content: char,
+                    })}\n\n`
+                  );
                   await new Promise((r) => setTimeout(r, 5));
                 }
-                res.write(`data: ${JSON.stringify({ type: "step_end", guideIndex: -1 })}\n\n`);
+                res.write(
+                  `data: ${JSON.stringify({
+                    type: "step_end",
+                    guideIndex: -1,
+                  })}\n\n`
+                );
               }
             }
           }
         }
 
-        // Summarize node
+        /* ---------------- FINAL SUMMARY ---------------- */
         if (event.name === "summarize" && event.event === "on_chain_end") {
           const finalAnswer = event.data?.output?.finalAnswer;
           if (finalAnswer?.content) {
             const tokensUsed = countTokens(finalAnswer.content);
+
             await prisma.user.update({
               where: { id: req.userId },
               data: { tokensUsed: { increment: tokensUsed } },
             });
 
             for (const char of finalAnswer.content) {
-              res.write(`data: ${JSON.stringify({ type: "token", content: char })}\n\n`);
+              res.write(
+                `data: ${JSON.stringify({
+                  type: "token",
+                  content: char,
+                })}\n\n`
+              );
               await new Promise((r) => setTimeout(r, 5));
             }
-            res.write(`data: ${JSON.stringify({ type: "final", tokensUsed })}\n\n`);
+
+            res.write(
+              `data: ${JSON.stringify({
+                type: "final",
+                tokensUsed,
+              })}\n\n`
+            );
           }
         }
       }
@@ -140,44 +198,13 @@ export default function chatRoutes(repairGraph) {
       res.write(`data: ${JSON.stringify({ type: "end" })}\n\n`);
       res.end();
     } catch (err) {
-      res.write(`data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({
+          type: "error",
+          message: err.message,
+        })}\n\n`
+      );
       res.end();
-    }
-  });
-
-  // Fetch all chat threads for sidebar
-  router.get("/history", authenticate, async (req, res) => {
-    const chats = await prisma.chat.findMany({
-      where: { userId: req.userId },
-      orderBy: { createdAt: "desc" },
-      select: { threadId: true, title: true, createdAt: true },
-    });
-    res.json(chats);
-  });
-
-  // Fetch single chat by threadId
-  router.get("/history/:threadId", authenticate, async (req, res) => {
-    const { threadId } = req.params;
-    const chat = await prisma.chat.findUnique({ where: { threadId } });
-    if (!chat) return res.status(404).json({ error: "Chat not found" });
-    res.json(chat);
-  });
-
-  // Create new chat
-  router.post("/new", authenticate, async (req, res) => {
-    try {
-      const { title } = req.body;
-      const threadId = `user_${req.userId}_${Date.now()}`;
-      const newChat = await prisma.chat.create({
-        data: {
-          userId: req.userId,
-          threadId,
-          title: title || "New Chat",
-        },
-      });
-      res.json(newChat);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
     }
   });
 
