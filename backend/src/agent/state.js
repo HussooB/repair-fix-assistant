@@ -1,15 +1,14 @@
 import { Annotation, MessagesAnnotation } from "@langchain/langgraph";
 
-/**
- * LangGraph State
- * JS version uses Annotation() directly
- */
 export const AgentState = Annotation.Root({
   // Chat history
   messages: MessagesAnnotation,
 
-  // User input
+  // Raw user input
   userQuery: Annotation(),
+
+  // Parsed intent (REQUIRED)
+  intent: Annotation(),
 
   // Tool outputs
   ifixitResult: Annotation(),

@@ -1,20 +1,36 @@
+// src/agent/nodes/summarize.js
 import { generate } from "../llm/huggingface.js";
 
 export async function summarizeNode(state) {
-  let content = "";
+  const messages = state.messages ?? [];
+
+  let toolContent = "";
   let source = "unknown";
-  let promptIntro = "";
+  let instruction = "";
 
   if (state.ifixitResult) {
-    content = JSON.stringify(state.ifixitResult, null, 2);
+    toolContent = JSON.stringify(state.ifixitResult, null, 2);
     source = "ifixit";
-    promptIntro =
-      "This is an OFFICIAL iFixit repair guide. Format it in clean Markdown.";
+    instruction = `
+You are a repair assistant.
+You MUST strictly follow the official iFixit guide.
+Format the answer in clean Markdown:
+- Use # for title
+- Use ## Steps
+- Number each step
+- Mention "(Images available)" if images exist
+Do NOT invent steps.
+`;
   } else if (state.webResult) {
-    content = JSON.stringify(state.webResult, null, 2);
+    toolContent = JSON.stringify(state.webResult, null, 2);
     source = "web";
-    promptIntro =
-      "This is web search data. Summarize into safe general repair advice.";
+    instruction = `
+You are a repair assistant.
+This information comes from community web sources.
+Summarize safely.
+Do NOT invent precise disassembly steps.
+Use general repair advice only.
+`;
   } else {
     return {
       ...state,
@@ -25,14 +41,29 @@ export async function summarizeNode(state) {
     };
   }
 
-  const prompt = `${promptIntro}\n\n${content}`;
-  const formattedContent = await generate(prompt);
+  const conversationContext = messages
+    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+    .join("\n");
+
+  const prompt = `
+${instruction}
+
+Conversation so far:
+${conversationContext}
+
+Tool data:
+${toolContent}
+
+Produce the best possible answer for the user's latest question.
+`;
+
+  const content = await generate(prompt);
 
   return {
     ...state,
     finalAnswer: {
       source,
-      content: formattedContent,
+      content,
     },
   };
 }

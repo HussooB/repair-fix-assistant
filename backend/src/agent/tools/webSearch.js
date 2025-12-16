@@ -4,7 +4,8 @@ const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 const TAVILY_URL = "https://api.tavily.com/search";
 
 /**
- * Web search fallback using Tavily
+ * Web search fallback (Tavily)
+ * Used ONLY when intent confidence is low
  */
 export async function webSearch(query) {
   try {
@@ -16,16 +17,21 @@ export async function webSearch(query) {
       include_answer: true,
     });
 
+    const data = res.data;
+
     return {
-      answer: res.data.answer || null,
-      sources: (res.data.results || []).map(r => ({
+      answer: data?.answer || null,
+      sources: (data?.results || []).map(r => ({
         title: r.title,
         url: r.url,
-        content: r.content,
+        snippet: r.content?.slice(0, 300) || "",
       })),
     };
   } catch (error) {
-    console.error("Tavily error:", error.response?.data || error.message);
+    console.error(
+      "Tavily webSearch failed:",
+      error.response?.data || error.message
+    );
     return null;
   }
 }
