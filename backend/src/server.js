@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 
 import authRoutes from "./routes/auth.js";
 import chatRoutes from "./routes/chat.js";
+import chatHistoryRoutes from "./routes/chatHistory.js"; 
 import { initializeGraph } from "./agent/graph.js";
 
 dotenv.config();
@@ -20,6 +21,7 @@ async function startServer() {
 
   app.use("/api/auth", authRoutes);
   app.use("/api/chat", chatRoutes(repairGraph));
+  app.use("/api/chat/history", chatHistoryRoutes);
 
   app.get("/health", (req, res) => {
     res.json({

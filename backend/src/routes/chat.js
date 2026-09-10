@@ -1,5 +1,3 @@
-
-
 import express from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../db/prisma.js";
@@ -47,7 +45,6 @@ export default function chatRoutes(repairGraph) {
 
     const writeToken = async (content) => {
       res.write(`data: ${JSON.stringify({ type: "token", content })}\n\n`);
-      // Small delay for natural typing feel (~30-50ms per char = realistic)
       await new Promise((r) => setTimeout(r, 30));
     };
 
@@ -63,6 +60,20 @@ export default function chatRoutes(repairGraph) {
         { configurable: { thread_id: userThreadId }, version: "v1" }
       )) {
         if (INTERNAL_NODES.includes(event.name)) continue;
+
+        /* ---------------- CLARIFYING NODE (Fix for "Hey") ---------------- */
+        if (event.name === "clarifyingNode" && event.event === "on_chain_end") {
+          const finalAnswer = event.data?.output?.finalAnswer;
+          if (finalAnswer?.content) {
+            // Stream the friendly clarifying message character by character
+            for (const char of finalAnswer.content) {
+              await writeToken(char);
+            }
+            res.write(`data: ${JSON.stringify({ type: "end" })}\n\n`);
+            res.end();
+            return; // Exit the loop early since we're done
+          }
+        }
 
         /* ---------------- iFixit NODE ---------------- */
         if (event.name === "ifixit" && event.event === "on_chain_end") {
@@ -92,31 +103,28 @@ export default function chatRoutes(repairGraph) {
         }
 
         /* ---------------- WEB NODE ---------------- */
-  /* ---------------- WEB NODE ---------------- */
-if (event.name === "web" && event.event === "on_chain_end") {
-  const webResult = event.data?.output?.webResult || event.data?.output;
+        if (event.name === "web" && event.event === "on_chain_end") {
+          const webResult = event.data?.output?.webResult || event.data?.output;
 
-  if (webResult?.answer) {
-    // Stream the main answer
-    for (const char of webResult.answer + "\n\n") {
-      await writeToken(char);
-    }
+          if (webResult?.answer) {
+            for (const char of webResult.answer + "\n\n") {
+              await writeToken(char);
+            }
 
-    // Stream references/sources
-    if (webResult.sources?.length) {
-      const sourcesText =
-        webResult.sources
-          .map((s) => `- [${s.title}](${s.url})`)
-          .join("\n") + "\n\n";
+            if (webResult.sources?.length) {
+              const sourcesText =
+                webResult.sources
+                  .map((s) => `- [${s.title}](${s.url})`)
+                  .join("\n") + "\n\n";
 
-      for (const char of sourcesText) {
-        await writeToken(char);
-      }
-    }
-  } else {
-    writeDiagnostic("⚠️ Web search completed without detailed content.");
-  }
-}
+              for (const char of sourcesText) {
+                await writeToken(char);
+              }
+            }
+          } else {
+            writeDiagnostic("⚠️ Web search completed without detailed content.");
+          }
+        }
 
         /* ---------------- FINAL SUMMARY ---------------- */
         if (event.name === "summarize" && event.event === "on_chain_end") {
@@ -129,7 +137,6 @@ if (event.name === "web" && event.event === "on_chain_end") {
               data: { tokensUsed: { increment: tokensUsed } },
             });
 
-            // Stream the final LLM response character by character
             for (const char of finalAnswer.content) {
               await writeToken(char);
             }

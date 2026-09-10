@@ -18,12 +18,22 @@ model User {
 }
 
 model Chat {
-  id        String @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    Int
-  threadId  String @unique
-  user      User   @relation(fields: [userId], references: [id])
+  threadId  String    @unique
   title     String
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[] // <-- NEW
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  chatId    String
+  role      String   // "user" or "assistant"
+  content   String
   createdAt DateTime @default(now())
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
 }
 
 model ToolCache {

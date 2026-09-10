@@ -63,9 +63,17 @@ export default function Auth() {
       navigate('/chat');
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'An error occurred. Please try again.');
+        // Read the correct error fields returned by the backend (error, details, or message)
+        const errorMsg =
+          err.response?.data?.error ||
+          err.response?.data?.details ||
+          err.response?.data?.message ||
+          'An error occurred. Please try again.';
+        setError(errorMsg);
+      } else if (err instanceof Error) {
+        setError(err.message);
       } else {
-        setError('An unexpected error occurred');
+        setError('An unexpected error occurred. Please try again.');
       }
     } finally {
       setIsLoading(false);
