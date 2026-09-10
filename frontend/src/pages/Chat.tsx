@@ -36,7 +36,6 @@ export default function Chat() {
   const [inputValue, setInputValue] = useState('');
   const [currentMessage, setCurrentMessage] = useState('');
   
-  // Explicitly set <string> generic to prevent template literal type error
   const [threadId, setThreadId] = useState<string>(() => crypto.randomUUID());
   
   const [error, setError] = useState<string | null>(null);
@@ -47,17 +46,10 @@ export default function Chat() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  const saveChatToBackend = async (newAssistantContent: string) => {
+  // ✅ FIX: Accept the fully constructed messages array to prevent stale state overwrites
+  const saveChatToBackend = useCallback(async (threadId: string, title: string, messages: any[]) => {
     const token = localStorage.getItem('token');
-    if (!token || !activeThreadId) return;
-
-    const activeConv = conversations.find(c => c.threadId === activeThreadId);
-    if (!activeConv) return;
-
-    const allMessages = [
-      ...activeConv.messages,
-      { role: 'assistant', content: newAssistantContent, createdAt: new Date().toISOString(), id: crypto.randomUUID() },
-    ];
+    if (!token || !threadId) return;
 
     try {
       await fetch(`${API_BASE_URL}/api/chat/history/save`, {
@@ -67,33 +59,25 @@ export default function Chat() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          threadId: activeThreadId,
-          title: activeConv.title,
-          messages: allMessages,
+          threadId,
+          title,
+          messages,
         }),
       });
-      
-      const res = await fetch(`${API_BASE_URL}/api/chat/history/list`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setConversations(await res.json());
+      // Removed refetch to prevent race conditions overwriting optimistic UI updates
     } catch (err) {
       console.error("Failed to save chat", err);
     }
-  };
+  }, []);
 
-  // Declare callbacks FIRST (before useSSEChat)
   const handleSSEEvent = useCallback((event: SSEEvent) => {
     if (event.type === 'token' && event.content) {
       setCurrentMessage((prev) => prev + event.content);
     } else if (event.type === 'end') {
       if (currentMessage && activeThreadId) {
         const finalContent = currentMessage;
-        
-        // 1. Clear streaming state immediately
         setCurrentMessage('');
         
-        // 2. Optimistically add to local state to prevent UI flash
         const newMessage = {
           id: crypto.randomUUID(),
           role: 'assistant',
@@ -101,17 +85,25 @@ export default function Chat() {
           createdAt: new Date().toISOString(),
         };
 
-        setConversations(prev => prev.map(conv => 
-          conv.threadId === activeThreadId
-            ? { ...conv, messages: [...conv.messages, newMessage] }
-            : conv
-        ));
-
-        // 3. Save to backend silently in the background
-        saveChatToBackend(finalContent);
+        // ✅ FIX: Use functional update to guarantee we are working with the latest state
+        setConversations(prev => {
+          const updated = prev.map(conv => 
+            conv.threadId === activeThreadId
+              ? { ...conv, messages: [...conv.messages, newMessage] }
+              : conv
+          );
+          
+          // Save the fully updated conversation to backend
+          const activeConv = updated.find(c => c.threadId === activeThreadId);
+          if (activeConv) {
+            saveChatToBackend(activeThreadId, activeConv.title, activeConv.messages);
+          }
+          
+          return updated;
+        });
       }
     }
-  }, [currentMessage, activeThreadId]);
+  }, [currentMessage, activeThreadId, saveChatToBackend]);
 
   const handleError = useCallback((err: Error) => {
     setError(err.message);
@@ -119,7 +111,6 @@ export default function Chat() {
 
   const handleComplete = useCallback(() => {}, []);
 
-  // Call useSSEChat after callbacks are declared
   const { isLoading, isStreaming, diagnosticMessage, startStream, stopStream } = useSSEChat({
     token: localStorage.getItem('token') || '',
     threadId,
@@ -128,7 +119,6 @@ export default function Chat() {
     onComplete: handleComplete,
   });
 
-  // Load chats from BACKEND
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -180,19 +170,21 @@ export default function Chat() {
       setThreadId(newThreadId);
     }
 
-    const tempChat: DbChat = activeConversation || {
-      id: crypto.randomUUID(),
-      threadId: newThreadId,
-      title: generateTitle(trimmedInput),
-      messages: [],
-    };
-    
-    const updatedMessages = [
-      ...tempChat.messages, 
-      { role: 'user', content: trimmedInput, createdAt: new Date().toISOString(), id: crypto.randomUUID() }
-    ];
-    
+    // ✅ FIX: Use functional update to ensure we have the absolute latest state
     setConversations(prev => {
+      const existingConv = prev.find(c => c.threadId === newThreadId);
+      const tempChat: DbChat = existingConv || {
+        id: crypto.randomUUID(),
+        threadId: newThreadId,
+        title: generateTitle(trimmedInput),
+        messages: [],
+      };
+      
+      const updatedMessages = [
+        ...tempChat.messages, 
+        { role: 'user', content: trimmedInput, createdAt: new Date().toISOString(), id: crypto.randomUUID() }
+      ];
+      
       const others = prev.filter(c => c.threadId !== newThreadId);
       return [{ ...tempChat, messages: updatedMessages }, ...others];
     });
@@ -231,7 +223,7 @@ export default function Chat() {
     if (window.innerWidth < 1024) setSidebarOpen(false);
   };
 
-  const handleDeleteConversation = async (e: React.MouseEvent, threadId: string) => {
+  const handleDeleteConversation = (e: React.MouseEvent, threadId: string) => {
     e.stopPropagation();
     setConversations(prev => prev.filter((conv) => conv.threadId !== threadId));
     if (activeThreadId === threadId) {
