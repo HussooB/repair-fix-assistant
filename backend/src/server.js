@@ -11,7 +11,20 @@ import { initializeGraph } from "./agent/graph.js";
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+// ✅ UPDATED: Allow both local development and your Vercel production URL
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.FRONTEND_URL || "https://your-app.vercel.app" // We will set FRONTEND_URL in Render
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
 app.use(express.json());
 
 async function startServer() {
@@ -24,10 +37,7 @@ async function startServer() {
   app.use("/api/chat/history", chatHistoryRoutes);
 
   app.get("/health", (req, res) => {
-    res.json({
-      status: "ok",
-      time: new Date().toISOString(),
-    });
+    res.json({ status: "ok", time: new Date().toISOString() });
   });
 
   app.get("/", (req, res) => {
@@ -35,9 +45,7 @@ async function startServer() {
   });
 
   const PORT = process.env.PORT || 10000;
-  app.listen(PORT, () =>
-    console.log(`Server running on port ${PORT}`)
-  );
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
 
 startServer();
