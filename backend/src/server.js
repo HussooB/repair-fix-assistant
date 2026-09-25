@@ -3,6 +3,7 @@ import './pg-ssl-fix.js';
 import cors from "cors";
 import dotenv from "dotenv";
 
+
 import authRoutes from "./routes/auth.js";
 import chatRoutes from "./routes/chat.js";
 import chatHistoryRoutes from "./routes/chatHistory.js"; 
